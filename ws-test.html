@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Family Feud WebSocket Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+</head>
+<body>
+  <h2>WebSocket Game State Listener</h2>
+  <label>Game Code: <input id="gameCode" value="ABC123"></label>
+  <button onclick="connect()">Connect & Subscribe</button>
+  <button onclick="disconnect()">Disconnect</button>
+  <br><br>
+  <label>Send Test Message: <input id="testMsg" value='{"type":"test"}' style="width:300px;"></label>
+  <button onclick="sendTestMessage()">Send</button>
+  <pre id="output" style="background:#222;color:#0f0;padding:1em;height:300px;overflow:auto;"></pre>
+  <script>
+    let stompClient = null;
+    let subscription = null;
+    function connect() {
+      const code = document.getElementById('gameCode').value;
+      const socket = new SockJS('http://localhost:8080/ws');
+      stompClient = Stomp.over(socket);
+      stompClient.connect({}, function (frame) {
+        log('Connected: ' + frame);
+        subscription = stompClient.subscribe('/topic/game/' + code, function (message) {
+          try {
+            const obj = JSON.parse(message.body);
+            log('Game update:\n' + JSON.stringify(obj, null, 2));
+          } catch (e) {
+            log('Game update: ' + message.body);
+          }
+        });
+      });
+    }
+
+    function disconnect() {
+      if (subscription) {
+        subscription.unsubscribe();
+        subscription = null;
+      }
+      if (stompClient) {
+        stompClient.disconnect(function() {
+          log('Disconnected');
+        });
+        stompClient = null;
+      }
+    }
+
+    function sendTestMessage() {
+      if (!stompClient || !stompClient.connected) {
+        log('Not connected.');
+        return;
+      }
+      const code = document.getElementById('gameCode').value;
+      const msg = document.getElementById('testMsg').value;
+      try {
+        stompClient.send('/app/game/' + code, {}, msg);
+        log('Sent: ' + msg);
+      } catch (e) {
+        log('Send failed: ' + e);
+      }
+    }
+
+    function log(msg) {
+      const out = document.getElementById('output');
+      out.textContent += msg + '\n';
+      out.scrollTop = out.scrollHeight;
+    }
+  </script>
+</body>
+</html>
