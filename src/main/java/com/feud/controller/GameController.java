@@ -185,4 +185,43 @@ public class GameController {
         return ResponseEntity.ok(correct);
     }
 
+    /**
+     * Reveal an answer for the current question by answer ID.
+     * @param code Game code
+     * @param answerId The ID of the answer to reveal
+     * @return The updated Game
+     */
+    @PostMapping("/{code}/reveal-answer")
+    public ResponseEntity<Game> revealAnswer(@PathVariable String code, @RequestParam Long answerId) {
+        Game game = gameService.revealAnswer(code, answerId);
+        // Broadcast updated game state
+        gameService.getWebSocketBroadcaster().broadcastGameState(game);
+        return ResponseEntity.ok(game);
+    }
+
+    /**
+     * Advance to the next round (or end the game if max rounds reached).
+     * @param code Game code
+     * @return The updated Game
+     */
+    @PostMapping("/{code}/next-round")
+    public ResponseEntity<Game> advanceToNextRound(@PathVariable String code) {
+        Game game = gameService.advanceToNextRound(code);
+        // Broadcast updated game state
+        gameService.getWebSocketBroadcaster().broadcastGameState(game);
+        return ResponseEntity.ok(game);
+    }
+
+    /**
+     * End the game immediately and set the winner.
+     * @param code Game code
+     * @return The updated Game
+     */
+    @PostMapping("/{code}/end-and-set-winner")
+    public ResponseEntity<Game> endGameAndSetWinner(@PathVariable String code) {
+        Game game = gameService.endGameAndSetWinner(code);
+        // Broadcast updated game state
+        gameService.getWebSocketBroadcaster().broadcastGameState(game);
+        return ResponseEntity.ok(game);
+    }
 }

@@ -2,6 +2,8 @@ package com.feud.model;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -18,7 +20,9 @@ public class Question {
     private String text;
 
     @OneToMany(mappedBy = "question", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonManagedReference("answers")
     private List<Answer> answers;
+
 
     // Getters and setters
     public Long getId() { return id; }

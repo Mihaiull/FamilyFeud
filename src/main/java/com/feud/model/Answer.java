@@ -1,5 +1,7 @@
 package com.feud.model;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -31,7 +33,7 @@ public class Answer {
 
     private boolean revealed;
 
-
+    @JsonBackReference("answers")
     @ManyToOne
     @JoinColumn(name = "question_id")
     private Question question;

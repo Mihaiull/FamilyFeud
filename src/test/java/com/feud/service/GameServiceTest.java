@@ -18,14 +18,18 @@ class GameServiceTest {
     private GameService gameService;
     private com.feud.repository.GameRepository mockGameRepository;
     private com.feud.websocket.GameWebSocketBroadcaster mockBroadcaster;
+    private com.feud.repository.QuestionRepository mockQuestionRepository;
+    private SynonymService mockSynonymService;
 
     @BeforeEach
     void setUp() {
         mockGameRepository = Mockito.mock(com.feud.repository.GameRepository.class);
         mockBroadcaster = Mockito.mock(com.feud.websocket.GameWebSocketBroadcaster.class);
+        mockQuestionRepository = Mockito.mock(com.feud.repository.QuestionRepository.class);
+        mockSynonymService = Mockito.mock(com.feud.service.SynonymService.class);
         // Save just returns the game object
         Mockito.when(mockGameRepository.save(Mockito.any())).thenAnswer(invocation -> invocation.getArgument(0));
-        gameService = new GameService(mockGameRepository, null, mockBroadcaster);
+        gameService = new GameService(mockGameRepository, null, mockBroadcaster, mockQuestionRepository, mockSynonymService);
     }
 
     @Test
@@ -78,6 +82,7 @@ class GameServiceTest {
     void testSubmitGuess_correctResetsStrikes() {
         Game game = new Game();
         game.setStrikes(2);
+        game.setStatus(com.feud.model.GameStatus.IN_PROGRESS);
         Mockito.when(mockGameRepository.findByCode("CODE")).thenReturn(java.util.Optional.of(game));
         List<Answer> answers = Arrays.asList(
                 Answer.builder().text("Car").points(40).build()
@@ -91,6 +96,7 @@ class GameServiceTest {
     void testSubmitGuess_incorrectIncrementsStrikes() {
         Game game = new Game();
         game.setStrikes(1);
+        game.setStatus(com.feud.model.GameStatus.IN_PROGRESS);
         Mockito.when(mockGameRepository.findByCode("CODE")).thenReturn(java.util.Optional.of(game));
         List<Answer> answers = Arrays.asList(
                 Answer.builder().text("Car").points(40).build()
@@ -115,6 +121,7 @@ class GameServiceTest {
     void testAttemptSteal_successful() {
         Game game = new Game();
         game.setStrikes(3);
+        game.setStatus(com.feud.model.GameStatus.IN_PROGRESS);
         Mockito.when(mockGameRepository.findByCode("CODE")).thenReturn(java.util.Optional.of(game));
         List<Answer> answers = Arrays.asList(
                 Answer.builder().text("Car").points(40).build()
@@ -128,6 +135,7 @@ class GameServiceTest {
     void testAttemptSteal_unsuccessful() {
         Game game = new Game();
         game.setStrikes(3);
+        game.setStatus(com.feud.model.GameStatus.IN_PROGRESS);
         Mockito.when(mockGameRepository.findByCode("CODE")).thenReturn(java.util.Optional.of(game));
         List<Answer> answers = Arrays.asList(
                 Answer.builder().text("Car").points(40).build()

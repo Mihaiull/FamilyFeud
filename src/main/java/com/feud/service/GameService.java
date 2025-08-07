@@ -9,9 +9,11 @@ import com.feud.dto.JoinGameRequest;
 import com.feud.model.Game;
 import com.feud.model.GameStatus;
 import com.feud.model.Player;
+import com.feud.model.Question;
 import com.feud.model.Team;
 import com.feud.repository.GameRepository;
 import com.feud.repository.PlayerRepository;
+import com.feud.repository.QuestionRepository;
 import com.feud.util.CodeGenerator;
 import com.feud.websocket.GameWebSocketBroadcaster;
 
@@ -22,11 +24,15 @@ public class GameService {
     private final GameRepository gameRepository;
     private final PlayerRepository playerRepository;
     private final GameWebSocketBroadcaster webSocketBroadcaster;
+    private final QuestionRepository questionRepository;
+    private final SynonymService synonymService;
 
-    public GameService(GameRepository gameRepository, PlayerRepository playerRepository, GameWebSocketBroadcaster webSocketBroadcaster){
+    public GameService(GameRepository gameRepository, PlayerRepository playerRepository, GameWebSocketBroadcaster webSocketBroadcaster, QuestionRepository questionRepository, SynonymService synonymService){
         this.gameRepository = gameRepository;
         this.playerRepository = playerRepository;
         this.webSocketBroadcaster = webSocketBroadcaster;
+        this.questionRepository = questionRepository;
+        this.synonymService = synonymService;
     }
 
     public Player joinGame(String code, JoinGameRequest request) {
@@ -71,11 +77,33 @@ public class GameService {
     }
 
     public Game startGame(String code) {
-    Game game = gameRepository.findByCode(code)
-        .orElseThrow(() -> new RuntimeException("Game not found"));
+        Game game = gameRepository.findByCode(code)
+            .orElseThrow(() -> new RuntimeException("Game not found"));
 
-    game.setStatus(GameStatus.IN_PROGRESS);
-    return gameRepository.save(game);
+        // 1. Set status
+        game.setStatus(GameStatus.IN_PROGRESS);
+        // 2. Set round number
+        game.setRoundNumber(1);
+        // 3. Set strikes
+        game.setStrikes(0);
+        // 4. Set scores
+        game.setRedScore(0);
+        game.setBlueScore(0);
+        // 5. Set starting team (randomly)
+        game.setCurrentTeam(Math.random() < 0.5 ? Team.RED : Team.BLUE);
+        // 6. Select and persist a random question for the round
+        java.util.List<Question> allQuestions = questionRepository.findAll();
+        if (!allQuestions.isEmpty()) {
+            Question selected = allQuestions.get((int)(Math.random() * allQuestions.size()));
+            game.setCurrentQuestion(selected);
+            System.out.println("Selected question for game " + code + ": " + selected.getText());
+        } else {
+            game.setCurrentQuestion(null);
+        }
+        // 7. Broadcast updated state
+        Game saved = gameRepository.save(game);
+        webSocketBroadcaster.broadcastGameState(saved);
+        return saved;
     }
 
     @Transactional
@@ -93,9 +121,58 @@ public class GameService {
 
     // --- Game Logic Methods ---
 
-    public Game nextRound(String code) {
+    /**
+     * Validates that the game is in progress and not ended.
+     */
+    private void validateGameInProgress(Game game) {
+        if (game.getStatus() != GameStatus.IN_PROGRESS) {
+            throw new RuntimeException("Game is not in progress");
+        }
+    }
+
+    /**
+     * Validates that the answer has not already been revealed.
+     */
+    private void validateAnswerNotRevealed(Game game, Long answerId) {
+        if (game.getRevealedAnswerIds().contains(answerId)) {
+            throw new RuntimeException("Answer already revealed");
+        }
+    }
+
+    /**
+     * Reveal an answer for the current question by ID. Adds to revealedAnswerIds.
+     */
+    public Game revealAnswer(String code, Long answerId) {
         Game game = gameRepository.findByCode(code)
             .orElseThrow(() -> new RuntimeException("Game not found"));
+        validateGameInProgress(game);
+        validateAnswerNotRevealed(game, answerId);
+        if (game.getRevealedAnswerIds() == null) {
+            game.setRevealedAnswerIds(new java.util.HashSet<>());
+        }
+        game.getRevealedAnswerIds().add(answerId);
+        return gameRepository.save(game);
+    }
+
+    /**
+     * Move to the next round: increment round, reset strikes, select new question, clear revealed answers.
+     * If maxRounds reached, set status to ENDED and winner.
+     */
+    public Game advanceToNextRound(String code) {
+        Game game = gameRepository.findByCode(code)
+            .orElseThrow(() -> new RuntimeException("Game not found"));
+        if (game.getRoundNumber() >= game.getMaxRounds()) {
+            // End game
+            game.setStatus(GameStatus.ENDED);
+            if (game.getRedScore() > game.getBlueScore()) {
+                game.setWinner(Team.RED);
+            } else if (game.getBlueScore() > game.getRedScore()) {
+                game.setWinner(Team.BLUE);
+            } else {
+                game.setWinner(null); // Tie
+            }
+            return gameRepository.save(game);
+        }
         game.setRoundNumber(game.getRoundNumber() + 1);
         game.setStrikes(0);
         // Alternate starting team
@@ -104,8 +181,36 @@ public class GameService {
         } else {
             game.setCurrentTeam(Team.BLUE);
         }
+        // Select a new random question
+        java.util.List<Question> allQuestions = questionRepository.findAll();
+        if (!allQuestions.isEmpty()) {
+            Question selected = allQuestions.get((int)(Math.random() * allQuestions.size()));
+            game.setCurrentQuestion(selected);
+        } else {
+            game.setCurrentQuestion(null);
+        }
+        // Clear revealed answers
+        game.setRevealedAnswerIds(new java.util.HashSet<>());
         return gameRepository.save(game);
     }
+
+    /**
+     * End the game immediately and set the winner.
+     */
+    public Game endGameAndSetWinner(String code) {
+        Game game = gameRepository.findByCode(code)
+            .orElseThrow(() -> new RuntimeException("Game not found"));
+        game.setStatus(GameStatus.ENDED);
+        if (game.getRedScore() > game.getBlueScore()) {
+            game.setWinner(Team.RED);
+        } else if (game.getBlueScore() > game.getRedScore()) {
+            game.setWinner(Team.BLUE);
+        } else {
+            game.setWinner(null); // Tie
+        }
+        return gameRepository.save(game);
+    }
+
 
     public Game addStrike(String code) {
         Game game = gameRepository.findByCode(code)
@@ -142,25 +247,68 @@ public class GameService {
     // --- Turn Management, Strikes, and Steal Mechanic ---
 
     /**
-     * Submit a guess for the current team. Returns true if correct, false if not.
-     * If incorrect, increments strikes. If strikes reach 3, enables steal for the other team.
+     * Checks if guess matches answer text or any synonym.
+     */
+    private boolean isCorrectGuess(String guess, String answerText) {
+        if (guess == null || answerText == null) return false;
+        if (guess.equalsIgnoreCase(answerText)) return true;
+        return synonymService.areSynonyms(guess, answerText);
+    }
+
+    /**
+     * Awards points for revealed answers to the current team.
+     * Only unrevealed answers are scored on correct guess or steal.
+     */
+    private void awardPointsForRevealedAnswers(Game game, java.util.List<com.feud.model.Answer> answers, Team team) {
+        int points = 0;
+        for (com.feud.model.Answer a : answers) {
+            if (game.getRevealedAnswerIds().contains(a.getId())) {
+                points += a.getPoints();
+            }
+        }
+        if (team == Team.RED) {
+            game.setRedScore(game.getRedScore() + points);
+        } else if (team == Team.BLUE) {
+            game.setBlueScore(game.getBlueScore() + points);
+        }
+    }
+
+    /**
+     * Submit a guess for the current team. Reveals answer if correct (by text or synonym), awards points, advances round if all answers revealed.
      */
     public boolean submitGuess(String code, String guess, java.util.List<com.feud.model.Answer> answers) {
         Game game = gameRepository.findByCode(code)
             .orElseThrow(() -> new RuntimeException("Game not found"));
+        validateGameInProgress(game);
         boolean correct = false;
+        int pointsAwarded = 0;
         for (com.feud.model.Answer a : answers) {
-            if (a.getText() != null && a.getText().equalsIgnoreCase(guess)) {
+            if (isCorrectGuess(guess, a.getText()) && !game.getRevealedAnswerIds().contains(a.getId())) {
                 correct = true;
-                break;
+                game.getRevealedAnswerIds().add(a.getId()); // reveal answer automatically
+                pointsAwarded += a.getPoints();
             }
         }
         if (correct) {
             game.setStrikes(0); // reset strikes on correct guess
+            // Award points for this guess to current team
+            if (game.getCurrentTeam() != null) {
+                if (game.getCurrentTeam() == Team.RED) {
+                    game.setRedScore(game.getRedScore() + pointsAwarded);
+                } else if (game.getCurrentTeam() == Team.BLUE) {
+                    game.setBlueScore(game.getBlueScore() + pointsAwarded);
+                }
+            }
         } else {
             game.setStrikes(game.getStrikes() + 1);
         }
+        // If all answers revealed, advance round automatically
+        boolean allRevealed = answers.stream().allMatch(ans -> game.getRevealedAnswerIds().contains(ans.getId()));
+        if (allRevealed) {
+            advanceToNextRound(code);
+        }
         gameRepository.save(game);
+        webSocketBroadcaster.broadcastGameState(game);
         return correct;
     }
 
@@ -180,23 +328,30 @@ public class GameService {
     }
 
     /**
-     * Allows the opposing team to steal after 3 strikes. Returns true if steal is successful.
+     * Attempt a steal after 3 strikes. Awards points for all revealed answers to stealing team.
      */
     public boolean attemptSteal(String code, String guess, java.util.List<com.feud.model.Answer> answers) {
         Game game = gameRepository.findByCode(code)
             .orElseThrow(() -> new RuntimeException("Game not found"));
+        validateGameInProgress(game);
         if (game.getStrikes() < 3) throw new RuntimeException("Steal not allowed yet");
         boolean correct = false;
+        int pointsAwarded = 0;
         for (com.feud.model.Answer a : answers) {
-            if (a.getText() != null && a.getText().equalsIgnoreCase(guess)) {
+            if (isCorrectGuess(guess, a.getText()) && !game.getRevealedAnswerIds().contains(a.getId())) {
                 correct = true;
-                break;
+                game.getRevealedAnswerIds().add(a.getId());
+                pointsAwarded += a.getPoints();
             }
         }
+        // Award all revealed answer points to stealing team
+        Team stealingTeam = (game.getCurrentTeam() == Team.RED) ? Team.BLUE : Team.RED;
+        awardPointsForRevealedAnswers(game, answers, stealingTeam);
         // Reset strikes and switch turn after steal attempt
         game.setStrikes(0);
         switchTurn(code);
         gameRepository.save(game);
+        webSocketBroadcaster.broadcastGameState(game);
         return correct;
     }
 
@@ -265,5 +420,9 @@ public class GameService {
     public Game getGameByCode(String code) {
         return gameRepository.findByCode(code)
             .orElseThrow(() -> new RuntimeException("Game not found"));
+    }
+
+    public GameWebSocketBroadcaster getWebSocketBroadcaster() {
+        return webSocketBroadcaster;
     }
 }
