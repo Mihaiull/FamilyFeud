@@ -1,10 +1,8 @@
 package com.feud.controller;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,6 +18,7 @@ import com.feud.model.Answer;
 import com.feud.model.Game;
 import com.feud.model.Player;
 import com.feud.model.Question;
+import com.feud.model.SynonymDictionary;
 import com.feud.repository.GameRepository;
 import com.feud.repository.PlayerRepository;
 import com.feud.repository.QuestionRepository;
@@ -62,6 +61,11 @@ public class AdminController {
     @DeleteMapping("/synonyms")
     public void deleteAllSynonyms() {
         synonymDictionaryRepository.deleteAll();
+    }
+
+    @GetMapping("/synonyms")
+    public List<SynonymDictionary> getAllSynonyms() {
+        return synonymDictionaryRepository.findAll();
     }
 
     @GetMapping("/games")
@@ -126,16 +130,9 @@ public class AdminController {
         return questionRepository.save(question);
     }
 
-    @PostMapping("/synonyms")
-    public Map<String, List<String>> getSynonymsForAnswers(@RequestBody Map<String, List<String>> body) {
-        List<String> answers = body.get("answers");
-        Map<String, List<String>> result = new HashMap<>();
-        for (String answer : answers) {
-            Set<String> synonymsSet = synonymService.getAllSynonyms(answer);
-            // Remove the canonical itself from the list, only return true synonyms
-            synonymsSet.remove(answer.trim().toLowerCase());
-            result.put(answer, new ArrayList<>(synonymsSet));
-        }
-        return result;
+    @PutMapping("synonyms/{canonical}")
+    public SynonymDictionary updateSynonym(@PathVariable String canonical, @RequestBody SynonymDictionary entry) {
+        entry.setCanonical(canonical);
+        return synonymDictionaryRepository.save(entry);
     }
 }

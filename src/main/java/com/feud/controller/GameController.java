@@ -145,8 +145,12 @@ public class GameController {
      */
     @GetMapping("/{code}/state")
     public ResponseEntity<Game> getGameState(@PathVariable String code) {
-        Game game = gameService.getGameByCode(code);
-        return ResponseEntity.ok(game);
+        try {
+            Game game = gameService.getGameByCode(code);
+            return ResponseEntity.ok(game);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
     }
     /**
      * Submit a guess for the current team. Returns true if correct, false if not.

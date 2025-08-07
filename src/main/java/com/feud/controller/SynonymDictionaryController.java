@@ -16,15 +16,31 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.feud.model.SynonymDictionary;
 import com.feud.repository.SynonymDictionaryRepository;
+import com.feud.service.SynonymSyncService;
 
 @RestController
 @RequestMapping("/synonyms")
 @CrossOrigin(origins = "*")
 public class SynonymDictionaryController {
     private final SynonymDictionaryRepository synonymDictionaryRepository;
+    private final SynonymSyncService synonymSyncService;
 
-    public SynonymDictionaryController(SynonymDictionaryRepository synonymDictionaryRepository) {
+    public SynonymDictionaryController(SynonymDictionaryRepository synonymDictionaryRepository,
+                                      SynonymSyncService synonymSyncService) {
         this.synonymDictionaryRepository = synonymDictionaryRepository;
+        this.synonymSyncService = synonymSyncService;
+    }
+    /**
+     * Sync all answer synonyms from questions, skipping words already present in the dictionary.
+     * @return Status message
+     */
+    @PostMapping("/sync-all")
+    public ResponseEntity<String> syncAllSynonyms() {
+        int before = synonymDictionaryRepository.findAll().size();
+        int added = synonymSyncService.syncAllAnswerSynonyms().size();
+        int after = synonymDictionaryRepository.findAll().size();
+        int newEntries = after - before;
+        return ResponseEntity.ok("Synonym sync complete. New entries added: " + newEntries);
     }
 
     /**

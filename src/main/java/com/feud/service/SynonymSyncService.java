@@ -54,12 +54,15 @@ public class SynonymSyncService {
         }
         Map<String, String> result = new HashMap<>();
         for (String word : canonicalWords) {
-            String synonyms = fetchSynonyms(word);
-            SynonymDictionary entry = new SynonymDictionary();
-            entry.setCanonical(word);
-            entry.setSynonyms(synonyms);
-            synonymDictionaryRepository.save(entry);
-            result.put(word, synonyms);
+            // Only fetch and save if not already present
+            if (synonymDictionaryRepository.findByCanonical(word).isEmpty()) {
+                String synonyms = fetchSynonyms(word);
+                SynonymDictionary entry = new SynonymDictionary();
+                entry.setCanonical(word);
+                entry.setSynonyms(synonyms);
+                synonymDictionaryRepository.save(entry);
+                result.put(word, synonyms);
+            }
         }
         return result;
     }

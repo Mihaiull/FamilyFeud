@@ -31,3 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Ignore Flyway DB config
+flyway-db.conf
+
+# Ignore local datasource config
+/resources/application.properties
+
+# Ignore local database migration files
+/resources/db/
